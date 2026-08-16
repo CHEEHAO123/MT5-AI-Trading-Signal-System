@@ -1,0 +1,14 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# JetBrains IDE
+.idea/
+
+# MT5 compiled artifacts
+*.ex5

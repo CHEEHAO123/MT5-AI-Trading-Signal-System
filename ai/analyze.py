@@ -1,3 +1,4 @@
+import os
 from google import genai
 import requests
 import xml.etree.ElementTree as ET
@@ -7,10 +8,19 @@ import time as time_module
 
 app = Flask(__name__)
 
-BOT_TOKEN        = "8643019569:AAGKlcnf8UNex_n9xITJPoRtsKS3rFyf7Wk"
-CHAT_ID          = "-1003933499766"
-CHAT_ID_TESTING  = "1112591551"
-GOOGLE_KEY       = "AQ.Ab8RN6JUWXyB6NukWrGWzYVyDJ0h-p6m7rZ3MwsB14klFbUYtA"
+BOT_TOKEN        = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+CHAT_ID          = os.environ.get("TELEGRAM_CHAT_ID", "")
+CHAT_ID_TESTING  = os.environ.get("TELEGRAM_CHAT_ID_TESTING", "")
+GOOGLE_KEY       = os.environ.get("GEMINI_API_KEY", "")
+
+_missing = [name for name, val in (
+    ("TELEGRAM_BOT_TOKEN", BOT_TOKEN),
+    ("TELEGRAM_CHAT_ID", CHAT_ID),
+    ("TELEGRAM_CHAT_ID_TESTING", CHAT_ID_TESTING),
+    ("GEMINI_API_KEY", GOOGLE_KEY),
+) if not val]
+if _missing:
+    raise RuntimeError(f"Missing required environment variable(s): {', '.join(_missing)}")
 
 client = genai.Client(api_key=GOOGLE_KEY)
 

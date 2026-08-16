@@ -6,11 +6,11 @@
 #property version   "2.00"
 #property strict
 
-#define BOT_TOKEN           "8643019569:AAGKlcnf8UNex_n9xITJPoRtsKS3rFyf7Wk"
-#define CHAT_ID             "-1003933499766"
-#define CHAT_ID_TESTING     "1112591551"
-#define CHAT_ID_EA_TESTING  "-1003933499766"
-#define LIVE_MODE           true
+input string InpBotToken      = ""; // Telegram Bot Token
+input string InpChatId        = ""; // Telegram Chat ID (live signals)
+input string InpChatIdTesting = ""; // Telegram Chat ID (testing/EA-testing)
+input string InpAiServerUrl   = "http://192.168.1.13:5000/analyze"; // AI analysis server URL
+input bool   InpLiveMode      = true; // Enable live Telegram/AI HTTP calls (false = log only)
 
 // ── Prevent duplicate signals ──
 int lastSignalType = 0; // 1=buy, -1=sell
@@ -79,6 +79,8 @@ void OnDeinit(const int reason)
     IndicatorRelease(handleMACD_M5);
     IndicatorRelease(handleMACD_M15);
     IndicatorRelease(handleSAR_M15);
+    IndicatorRelease(handleMA20_M15);
+    IndicatorRelease(handleATR_M5);
 
     SendTelegram("🛑 EA 已被停止。(第二版本 MT5)");
 }
@@ -332,24 +334,25 @@ bool SendTelegram(string message)
         StringReplace(printMsg, "%250A", " | ");
         Print("📨 TELEGRAM: ", printMsg);
         return true;
-    } 
-    
-   #ifdef LIVE_MODE
-       string url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
-       StringReplace(message, " ", "%20");
-       string fullUrl = url + "?chat_id=" + CHAT_ID + "&text=" + message;
-   
-       // MQL5 WebRequest signature is identical to MQL4 for the GET variant
-       char   post[];
-       char   result[];
-       string headers;
-       int res = WebRequest("GET", fullUrl, "", 5000, post, result, headers);
-       if (res == 200) { Print("Telegram sent OK"); return true; }
-       else            { Print("Telegram error: ", GetLastError(), " HTTP: ", res); return false; }
-   #else
-       Print("BACKTEST SIGNAL: ", message);
-       return true;
-   #endif
+    }
+
+    if (!InpLiveMode)
+    {
+        Print("📨 TELEGRAM (live mode off): ", message);
+        return true;
+    }
+
+    string url = "https://api.telegram.org/bot" + InpBotToken + "/sendMessage";
+    StringReplace(message, " ", "%20");
+    string fullUrl = url + "?chat_id=" + InpChatId + "&text=" + message;
+
+    // MQL5 WebRequest signature is identical to MQL4 for the GET variant
+    char   post[];
+    char   result[];
+    string headers;
+    int res = WebRequest("GET", fullUrl, "", 5000, post, result, headers);
+    if (res == 200) { Print("Telegram sent OK"); return true; }
+    else            { Print("Telegram error: ", GetLastError(), " HTTP: ", res); return false; }
 }
 
 //+------------------------------------------------------------------+
@@ -372,8 +375,13 @@ bool SendToExtForAI(
         Print("🤖 AI SKIP (backtest): signal=", signal, " price=", DoubleToString(price, 2));
         return true;
     }
- 
-#ifdef LIVE_MODE
+
+    if (!InpLiveMode)
+    {
+        Print("🤖 AI SKIP (live mode off): signal=", signal, " price=", DoubleToString(price, 2));
+        return true;
+    }
+
     double pipSize = SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 10;
     double range50 = ctx.high50 - ctx.low50;
     string timeStr = TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES);
@@ -440,17 +448,15 @@ bool SendToExtForAI(
         + "}"
         + "}";
  
-    string url        = "http://192.168.1.13:5000/analyze";
+    string url        = InpAiServerUrl;
     char   post[], result[];
     string reqHeaders  = "Content-Type: application/json\r\n";
     string respHeaders;
     StringToCharArray(body, post, 0, StringLen(body));
- 
+
     int res = WebRequest("POST", url, reqHeaders, 5000, post, result, respHeaders);
     if (res == 200) { Print("AI sent OK"); return true; }
     else            { Print("AI error: ", GetLastError(), " HTTP: ", res); return false; }
-#endif
-    return false;
 }
  
 //+------------------------------------------------------------------+
