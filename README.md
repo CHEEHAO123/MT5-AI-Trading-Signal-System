@@ -25,7 +25,7 @@ flowchart LR
     end
 
     AN -- "prompt" --> GEMINI["Google Gemini API"]
-    GEMINI -- "接受 / 拒绝 verdict" --> AN
+    GEMINI -- "Accept / Reject verdict" --> AN
     AN -- "AI verdict" --> TG
     NEWS -- "economic calendar" --> FF["ForexFactory\nweekly XML feed"]
     TG --> USER["Trader (Telegram chat)"]
