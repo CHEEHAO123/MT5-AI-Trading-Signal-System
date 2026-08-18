@@ -211,4 +211,4 @@ Backed by an hourly in-memory cache of the ForexFactory weekly XML calendar, fil
 
 ## License
 
-No license has been chosen yet for this project — treat it as all-rights-reserved / private until a license is added.
+MIT — see [LICENSE](LICENSE).
