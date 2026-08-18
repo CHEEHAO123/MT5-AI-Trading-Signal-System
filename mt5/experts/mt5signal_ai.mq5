@@ -6,12 +6,10 @@
 #property version   "2.10"
 #property strict
 
-#define BOT_TOKEN           "8643019569:AAGKlcnf8UNex_n9xITJPoRtsKS3rFyf7Wk"
-#define CHAT_ID             "-1003933499766"
-#define CHAT_ID_TESTING     "1112591551"
-#define CHAT_ID_EA_TESTING  "-1003933499766"
-#define LIVE_MODE           true
-#define pythonURL   "http://127.0.0.1:5000/"
+input string InpBotToken       = ""; // Telegram Bot Token
+input string InpChatId         = ""; // Telegram Chat ID (Live Signals)
+input string InpAiServerBaseUrl = "http://127.0.0.1:5000/"; // Analysis server base URL (trailing slash required)
+input bool   InpLiveMode       = true; // Enable live Telegram/AI HTTP calls (false = log only)
 
 int lastSignalType = 0;
 
@@ -354,11 +352,16 @@ bool SendTelegram(string message)
         return true;
     }
 
-#ifdef LIVE_MODE
-    string url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
+    if (!InpLiveMode)
+    {
+        Print("📨 TELEGRAM (live mode off): ", message);
+        return true;
+    }
+
+    string url = "https://api.telegram.org/bot" + InpBotToken + "/sendMessage";
 
     // Build JSON body instead of URL-encoded GET
-    string jsonBody = "{\"chat_id\":\"" + CHAT_ID + "\","
+    string jsonBody = "{\"chat_id\":\"" + InpChatId + "\","
                     + "\"text\":\""     + EscapeJson(message) + "\"}";
 
     char   post[];
@@ -372,10 +375,6 @@ bool SendTelegram(string message)
     if (res == 200) { Print("Telegram sent OK"); return true; }
     else            { Print("Telegram error: ", GetLastError(), " HTTP: ", res,
                             " Body: ", CharArrayToString(result)); return false; }
-#else
-    Print("BACKTEST SIGNAL: ", message);
-    return true;
-#endif
 }
 
 string EscapeJson(const string text)
@@ -410,7 +409,12 @@ bool SendToExtForAI(
         return true;
     }
 
-#ifdef LIVE_MODE
+    if (!InpLiveMode)
+    {
+        Print("🤖 AI SKIP (live mode off): signal=", signal, " price=", DoubleToString(price, 2));
+        return true;
+    }
+
     double pipSize = SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 10;
     double range50 = ctx.high50 - ctx.low50;
     string timeStr = TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES);
@@ -506,7 +510,7 @@ bool SendToExtForAI(
         + "}"
         + "}";
 
-    string url        = pythonURL + "analyze";
+    string url        = InpAiServerBaseUrl + "analyze";
     char   post[], result[];
     string reqHeaders  = "Content-Type: application/json\r\n";
     string respHeaders;
@@ -515,8 +519,6 @@ bool SendToExtForAI(
     int res = WebRequest("POST", url, reqHeaders, 5000, post, result, respHeaders);
     if (res == 200) { Print("AI sent OK"); return true; }
     else            { Print("AI error: ", GetLastError(), " HTTP: ", res); return false; }
-#endif
-    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -684,8 +686,14 @@ bool FetchAndSendNews()
         return true;
     }
 
+    if (!InpLiveMode)
+    {
+        Print("📰 NEWS SKIP (live mode off)");
+        return true;
+    }
+
     // ?send_telegram=1  tells Flask to also push the summary to Telegram
-    string url = pythonURL + "news?send_telegram=1";
+    string url = InpAiServerBaseUrl + "news?send_telegram=1";
 
     char   post[];
     char   result[];

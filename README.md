@@ -122,7 +122,7 @@ MT5 Sys/
 2. **Install the EA**
    - Copy `mt5/experts/mt5signal_ai.mq5` into your MT5 `MQL5/Experts` folder.
    - Compile it in MetaEditor.
-   - Attach it to an XAUUSD chart (M5) and fill in `InpBotToken`, `InpChatId`, `InpChatIdTesting`, and `InpAiServerUrl` in the EA's **Inputs** tab.
+   - Attach it to an XAUUSD chart (M5) and fill in `InpBotToken`, `InpChatId`, and `InpAiServerBaseUrl` in the EA's **Inputs** tab.
 
 3. **Whitelist URLs** in MT5 (see [Prerequisites](#prerequisites)) so `WebRequest` calls to Telegram and the analysis server succeed.
 
@@ -137,11 +137,10 @@ No secrets are hardcoded in source. Set them via EA inputs (MQL5) and environmen
 |---|---|
 | `InpBotToken` | Telegram bot token |
 | `InpChatId` | Telegram chat/channel to post signals to |
-| `InpChatIdTesting` | Alternate chat ID reserved for testing |
-| `InpAiServerUrl` | Analysis server address (default `http://192.168.1.13:5000/analyze` — change to your own deployment) |
+| `InpAiServerBaseUrl` | Analysis server base URL, trailing slash required (default `http://127.0.0.1:5000/` — change to your own deployment; the EA appends `analyze` / `news?send_telegram=1`) |
 | `InpLiveMode` | `true` = send real Telegram/AI HTTP calls, `false` = log only (Experts log), no network calls |
 
-`InpBotToken`, `InpChatId`, and `InpChatIdTesting` default to empty strings — the EA won't send Telegram messages until you fill them in.
+`InpBotToken` and `InpChatId` default to empty strings — the EA won't send Telegram messages until you fill them in.
 
 **`ai/analyze.py`** — set as environment variables before starting the server (see `.env.example`):
 | Variable | Purpose |
@@ -194,6 +193,15 @@ Backed by an hourly in-memory cache of the ForexFactory weekly XML calendar, fil
 - The EA checks `MQLInfoInteger(MQL_TESTER)` and skips all Telegram/HTTP calls in the MT5 **Strategy Tester**, printing to the Experts log instead — so strategy logic can be backtested without hitting live endpoints.
 - There is no automated test suite for `ai/analyze.py` yet. Recommended next step: unit tests around the ForexFactory XML parsing (`_fetch_ff_xml`) and prompt formatting, and an integration test that stubs the Gemini client.
 
+## Reliability & Error Handling
+
+- **Telegram/Gemini calls never crash the request.** All outbound Telegram calls go through a single `_send_telegram()` helper with an explicit timeout (`HTTP_TIMEOUT = 10s`) that catches `requests.RequestException`, logs, and returns `False` instead of raising — so a Telegram outage can't take down `/analyze` or `/news`.
+- **Gemini retry logic matches the actual SDK.** `call_gemini_with_retry()` retries on `google.genai.errors.ClientError` with `code == 429` (rate limit, exponential backoff) and on `ServerError` (transient 5xx), and re-raises immediately on anything else instead of retrying blindly.
+- **Malformed input is rejected, not crashed on.** `/analyze` validates the JSON body with `request.get_json(silent=True)` and defaults every nested section (`m5`, `m15`, `support_resistance`, candle dicts) to `{}` so a partial or malformed EA payload can't raise an `AttributeError` mid-request.
+- **Structured logging instead of `print`.** All server-side diagnostics go through the standard `logging` module (timestamped, leveled) rather than `print`, and unexpected exceptions are logged with full tracebacks via `logger.exception(...)`.
+- **A global Flask error handler** catches anything unhandled and always returns `200 {"status": "error", ...}` rather than leaking a bare 500/stack trace to the EA, consistent with the "EA shouldn't log an HTTP failure" contract used elsewhere in `/analyze`.
+- **MT5 EA side:** `OnInit()` now validates *every* indicator handle (including `handleMA20_M15` and `handleATR_M5`, previously unchecked) against `INVALID_HANDLE` before proceeding, and `WebRequest` failures in `SendTelegram()`/`SendToExtForAI()` are logged with `GetLastError()` and the HTTP status rather than assumed to succeed.
+
 ## Design Decisions
 
 - **Manual execution over auto-trading** — the EA only signals and asks Gemini for a sanity check; the human stays in the loop for order placement.
@@ -203,7 +211,6 @@ Backed by an hourly in-memory cache of the ForexFactory weekly XML calendar, fil
 
 ## Future Improvements
 
-- Validate `handleMA20_M15` and `handleATR_M5` in `OnInit`'s `INVALID_HANDLE` check (they're released in `OnDeinit` but not checked at creation).
 - Decide whether M15 SAR/MACD alignment should be an enforced entry filter, not just a display label.
 - Persist signals/AI verdicts/outcomes to a real datastore for win-rate and performance analytics.
 - Containerize `ai/analyze.py` (Docker) for easier deployment instead of a fixed LAN IP.

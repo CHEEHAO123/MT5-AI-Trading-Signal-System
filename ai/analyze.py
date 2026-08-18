@@ -1,12 +1,22 @@
+import logging
 import os
 from google import genai
+from google.genai import errors as genai_errors
 import requests
 import xml.etree.ElementTree as ET
 from flask import Flask, request, jsonify
 from datetime import datetime, timezone, timedelta
 import time as time_module
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("analyze")
+
 app = Flask(__name__)
+
+HTTP_TIMEOUT = 10  # seconds — applies to Telegram calls
 
 BOT_TOKEN        = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID          = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -41,19 +51,30 @@ WANTED_IMPACTS   = {"high", "medium"}
 WANTED_COUNTRIES = {"USD"}   # extend with "XAU" if needed
 MYT = timezone(timedelta(hours=8))
 
+def _send_telegram(chat_id, message):
+    """POST a message to a Telegram chat. Never raises — logs and returns False on failure."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    try:
+        resp = requests.post(
+            url, json={"chat_id": chat_id, "text": message}, timeout=HTTP_TIMEOUT
+        )
+        resp.raise_for_status()
+        return True
+    except requests.RequestException as e:
+        logger.error("Telegram send failed (chat_id=%s): %s", chat_id, e)
+        return False
+
 # Send to private chat for prompt debugging
 def send_telegram_private_bot(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID_TESTING, "text": message})
+    return _send_telegram(CHAT_ID_TESTING, message)
 
 def send_telegram(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": message})
+    return _send_telegram(CHAT_ID, message)
 
 def call_gemini_with_retry(prompt, max_retries=3):
-    """Call Gemini with exponential backoff on 429 rate limit."""
-    import google.api_core.exceptions as gexc
-    
+    """Call Gemini with exponential backoff on 429 rate limit / transient 5xx errors."""
+    last_error = None
+
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
@@ -61,24 +82,40 @@ def call_gemini_with_retry(prompt, max_retries=3):
                 contents=prompt
             )
             return response.text
-        except gexc.ResourceExhausted as e:
-            wait = 30 * (attempt + 1)  # 30s, 60s, 90s
-            print(f"[GEMINI] Rate limit hit (attempt {attempt+1}). Waiting {wait}s...")
+        except genai_errors.ClientError as e:
+            last_error = e
+            if e.code == 429:
+                wait = 30 * (attempt + 1)  # 30s, 60s, 90s
+                logger.warning("[GEMINI] Rate limited (attempt %d/%d). Waiting %ds...",
+                                attempt + 1, max_retries, wait)
+                time_module.sleep(wait)
+                continue
+            logger.error("[GEMINI] Client error %s: %s", e.code, e.message)
+            raise
+        except genai_errors.ServerError as e:
+            last_error = e
+            wait = 10 * (attempt + 1)
+            logger.warning("[GEMINI] Server error %s (attempt %d/%d). Waiting %ds...",
+                            e.code, attempt + 1, max_retries, wait)
             time_module.sleep(wait)
         except Exception as e:
-            print(f"[GEMINI] Unexpected error: {e}")
+            logger.error("[GEMINI] Unexpected error: %s", e)
             raise
-    
-    raise Exception("Gemini rate limit exceeded after all retries.")
+
+    raise RuntimeError(f"Gemini call failed after {max_retries} retries: {last_error}")
     
     
 @app.route("/analyze", methods=["GET", "POST"])
 def analyze():
-    print("REQUEST RECEIVED")
+    logger.info("REQUEST RECEIVED")
     if request.method == "GET":
         return jsonify({"status": "ok", "message": "server running"}), 200
 
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        logger.warning("Rejected /analyze request with invalid or missing JSON body")
+        # 200 so the EA doesn't log an HTTP failure, matching the error contract below
+        return jsonify({"status": "error", "message": "invalid or missing JSON body"}), 200
 
     # ── Top-level fields ──
     signal     = data.get("signal",     "")
@@ -92,7 +129,7 @@ def analyze():
     session    = data.get("session",    "")
 
     # ── M5 indicators ──
-    m5            = data.get("m5", {})
+    m5            = data.get("m5") or {}
     m5_ma20       = m5.get("ma20",      "")
     m5_sar        = m5.get("sar",       "")
     m5_macd_main  = m5.get("macd_main", "")
@@ -101,9 +138,9 @@ def analyze():
     m5_macd_hist  = m5.get("macd_hist",       "")      # NEW
     m5_macd_hdir  = m5.get("macd_hist_dir",   "")      # NEW  +1.0=rising  -1.0=falling
     m5_macd_h5    = m5.get("macd_hist_last5", [])      # NEW  [oldest→current]
-    
+
     # ── M15 indicators ──
-    m15            = data.get("m15", {})
+    m15            = data.get("m15") or {}
     m15_ma20       = m15.get("ma20",      "")
     m15_sar        = m15.get("sar",       "")
     m15_macd_main  = m15.get("macd_main", "")
@@ -114,7 +151,7 @@ def analyze():
     m15_macd_h5    = m15.get("macd_hist_last5", [])     # NEW
 
     # ── Support / Resistance ──
-    sr                    = data.get("support_resistance", {})
+    sr                    = data.get("support_resistance") or {}
     resistance_level      = sr.get("resistance_level",          "")
     support_level         = sr.get("support_level",             "")
     resistance_touches    = sr.get("resistance_touch_count",    "")
@@ -127,7 +164,7 @@ def analyze():
     dist_to_support       = sr.get("dist_to_support",           "")
 
     # ── Current candle ──
-    cur      = data.get("current_candle", {})
+    cur      = data.get("current_candle") or {}
     cur_open  = cur.get("open",     "")
     cur_high  = cur.get("high",     "")
     cur_low   = cur.get("low",      "")
@@ -136,7 +173,7 @@ def analyze():
     cur_wick  = cur.get("wick_pct", "")
 
     # ── Previous candle ──
-    prev       = data.get("previous_candle", {})
+    prev       = data.get("previous_candle") or {}
     prev_open  = prev.get("open",     "")
     prev_high  = prev.get("high",     "")
     prev_low   = prev.get("low",      "")
@@ -145,7 +182,7 @@ def analyze():
     prev_wick  = prev.get("wick_pct", "")
 
     # ── Last 50 candles summary ──
-    c50         = data.get("last_50_candles", {})
+    c50         = data.get("last_50_candles") or {}
     hh_hl       = c50.get("hh_hl_count",    "")
     lh_ll       = c50.get("lh_ll_count",    "")
     range_high  = c50.get("range_high",     "")
@@ -282,8 +319,8 @@ def analyze():
         return jsonify({"status": "ok"})
     except Exception as e:
         error_msg = f"⚠️ AI 分析失败 ({signal}) — {str(e)}"
-        print(f"[ANALYZE] {error_msg}")
-        send_telegram(error_msg)
+        logger.exception("[ANALYZE] failed for signal=%s", signal)
+        send_telegram(error_msg)  # best-effort; _send_telegram never raises
         return jsonify({"status": "error", "message": str(e)}), 200  # return 200 so EA doesn't log HTTP error
 
 
@@ -295,8 +332,12 @@ def _fetch_ff_xml() -> list[dict]:
     headers = {"User-Agent": "Mozilla/5.0 (GoldMonitor EA news fetcher)"}
     resp = requests.get(FF_XML_URL, headers=headers, timeout=15)
     resp.raise_for_status()
- 
-    root = ET.fromstring(resp.content)
+
+    try:
+        root = ET.fromstring(resp.content)
+    except ET.ParseError as e:
+        raise RuntimeError(f"ForexFactory response was not valid XML: {e}") from e
+
     events = []
  
     for ev in root.findall("event"):
@@ -347,13 +388,13 @@ def get_news_cached() -> list[dict]:
     age = now - _news_cache["fetched_at"]
  
     if _news_cache["data"] is None or age > _news_cache["ttl_seconds"]:
-        print(f"[NEWS] Cache miss (age={age:.0f}s) — fetching from ForexFactory…")
+        logger.info("[NEWS] Cache miss (age=%.0fs) — fetching from ForexFactory…", age)
         try:
             _news_cache["data"]       = _fetch_ff_xml()
             _news_cache["fetched_at"] = now
-            print(f"[NEWS] Fetched {len(_news_cache['data'])} USD High/Medium events.")
-        except Exception as e:
-            print(f"[NEWS] Fetch failed: {e}")
+            logger.info("[NEWS] Fetched %d USD High/Medium events.", len(_news_cache["data"]))
+        except (requests.RequestException, RuntimeError) as e:
+            logger.error("[NEWS] Fetch failed: %s", e)
             # Return stale data if available, empty list otherwise
             return _news_cache["data"] or []
  
@@ -481,21 +522,36 @@ def _format_news_for_ea(events: list[dict]) -> list[dict]:
 # ════════════════════════════════════════════════════════════════════
 @app.route("/news", methods=["GET"])
 def news():
-    events = get_news_cached()
-    ea_list = _format_news_for_ea(events)
- 
-    # ── Optional: push today's summary to Telegram ──
-    if request.args.get("send_telegram", "0") == "1":
-        msg = _format_news_for_telegram(events)
-        send_telegram(msg)
- 
-    return jsonify({
-        "status":       "ok",
-        "fetched_at": datetime.fromtimestamp(_news_cache["fetched_at"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        "count":        len(ea_list),
-        "events":       ea_list,
-    })
- 
- 
+    try:
+        events = get_news_cached()
+        ea_list = _format_news_for_ea(events)
+
+        # ── Optional: push today's summary to Telegram ──
+        if request.args.get("send_telegram", "0") == "1":
+            msg = _format_news_for_telegram(events)
+            send_telegram(msg)  # best-effort; _send_telegram never raises
+
+        fetched_at = (
+            datetime.fromtimestamp(_news_cache["fetched_at"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            if _news_cache["fetched_at"] else None
+        )
+        return jsonify({
+            "status":     "ok",
+            "fetched_at": fetched_at,
+            "count":      len(ea_list),
+            "events":     ea_list,
+        })
+    except Exception as e:
+        logger.exception("[NEWS] /news request failed")
+        return jsonify({"status": "error", "message": str(e)}), 200
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    """Last-resort net: log the full traceback and never leak a bare 500/stack trace."""
+    logger.exception("Unhandled exception in %s", request.path)
+    return jsonify({"status": "error", "message": "internal server error"}), 200
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
