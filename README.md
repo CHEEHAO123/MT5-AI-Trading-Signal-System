@@ -49,8 +49,6 @@ flowchart LR
 | Trading platform | MetaTrader 5 (MQL5 Expert Advisor) |
 | Analysis service | Python 3, Flask |
 | AI model | Google Gemini (`gemini-2.5-flash` via `google-genai`) |
-| Database | MySQL 8.0 |
-| ORM / migrations | SQLAlchemy 2.0 + Alembic |
 | Notifications | Telegram Bot API |
 | News data | ForexFactory weekly XML calendar |
 
@@ -78,94 +76,48 @@ Not used in this project. There is no message broker — the EA talks to the ana
 
 ## Database Design
 
-Signals, their indicator snapshots, the AI verdict, and (eventually) the trade outcome are persisted to **MySQL** so a future report engine can compute real win rates instead of relying on memory/Telegram scrollback. The ForexFactory news cache stays in-memory only (unchanged) — nothing about `/news` touches the database.
+Not used in this project. There is no persistent database:
 
-Schema (managed by Alembic — see [Database Setup](#database-setup)):
+- The EA's `MarketContext` struct exists only in memory for the duration of a signal.
+- The analysis server keeps a single in-memory, TTL-based cache (`_news_cache`) for the ForexFactory calendar; nothing is written to disk.
 
-| Table | Purpose |
-| :--- | :--- |
-| `strategy` | One row per EA/strategy version (`name`, `version`, `enabled`) that signals are attributed to. Seeded with the current `GoldMonitor` v2.10 EA. |
-| `signal` | One row per fired signal — symbol, fire time, the signal candle's open time, session, type (BUY/SELL), price/SL/TP/RR/spread. FK → `strategy`. |
-| `signal_indicator` | One row per (signal, timeframe) — MA20/SAR/MACD hit flags for that timeframe (M5, M15). FK → `signal`. |
-| `ai_analysis` | Gemini's verdict for a signal — decision, confidence, risk note, comment, and the raw model response for audit. FK → `signal`. |
-| `signal_outcome` | Populated later by a batch job that walks MT5 history forward from the signal's candle to determine whether TP or SL hit first (`TP_HIT`/`SL_HIT`/`EXPIRED`/`OPEN`), plus exit price/time and P&L. FK → `signal`, one row max per signal. This is what makes win-rate reporting possible. |
-
-**Not yet wired up:** `ai/analyze.py`'s `/analyze` handler doesn't write to these tables yet (it only calls Gemini/Telegram today) — see [Future Improvements](#future-improvements).
+If trade history/analytics tracking is needed later, see [Future Improvements](#future-improvements).
 
 ## Project Structure
 
 ```
 MT5 Sys/
 ├── README.md
-├── requirements.txt              # Python deps: flask, requests, google-genai, PyMySQL, SQLAlchemy, alembic, python-dotenv
-├── .env.example                  # Template for required env vars (Telegram/Gemini/DB) — copy to .env, never commit real values
+├── requirements.txt            # Python deps for ai/analyze.py
+├── .env.example                # Template for the analysis server's required env vars
 ├── .gitignore
-├── alembic.ini                   # Alembic config — points at ai/migrations, DB URL is set at runtime from .env (never hardcoded here)
 │
 ├── mt5/
 │   └── experts/
-│       └── mt5signal_ai.mq5      # MT5 Expert Advisor (signal detection + Telegram/AI dispatch)
-│
-├── deploy/
-│   └── mysql/
-│       └── create_database.sql  # One-time provisioning script: creates the mt5_signals DB + a dedicated mt5_app MySQL user (run once as root)
+│       └── mt5signal_ai.mq5    # MT5 Expert Advisor (signal detection + Telegram/AI dispatch)
 │
 └── ai/
-    ├── analyze.py                # Flask service: /analyze (Gemini verdict) and /news (ForexFactory calendar)
-    ├── models.py                 # SQLAlchemy declarative models — one class per table (Strategy, Signal, SignalIndicator, AiAnalysis, SignalOutcome) + the engine/session factory
-    ├── db.py                     # Thin data-access layer used by analyze.py — get_session() plus insert_signal/insert_signal_indicator/insert_ai_analysis/insert_signal_outcome
-    └── migrations/
-        ├── env.py                # Alembic runtime — loads DB credentials from .env via ai/models.py and points Alembic at the SQLAlchemy models
-        ├── script.py.mako        # Template Alembic fills in when you run `alembic revision --autogenerate`
-        └── versions/
-            └── 0001_initial_schema.py  # Creates all 5 tables + seeds the GoldMonitor v2.10 strategy row
+    └── analyze.py              # Flask service: /analyze (Gemini verdict) and /news (ForexFactory calendar)
 ```
 
 ## Prerequisites
 
 - MetaTrader 5 terminal with **Algo Trading** enabled.
 - MT5 **Tools → Options → Expert Advisors** — the analysis server's URL and `https://api.telegram.org` must be added to the allowed **WebRequest** URL list, or all HTTP calls will silently fail.
-- Python 3.10+ with dependencies from `requirements.txt` (`flask`, `requests`, `google-genai`, `PyMySQL`, `SQLAlchemy`, `alembic`, `python-dotenv`).
-- **MySQL Server 8.0** running locally (or reachable over the network) — see [Database Setup](#database-setup).
+- Python 3.10+ with dependencies from `requirements.txt` (`flask`, `requests`, `google-genai`).
 - A Telegram bot token and chat ID (create a bot via [@BotFather](https://t.me/BotFather)).
 - A Google Gemini API key.
 
-## Database Setup
-
-Run this once before starting the analysis server for the first time.
-
-1. **Create the database and a dedicated MySQL user** — edit `deploy/mysql/create_database.sql` (replace `CHANGE_ME_STRONG_PASSWORD` with a real password), then run it as root:
-   ```cmd
-   "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p < "deploy\mysql\create_database.sql"
-   ```
-   This creates a `mt5_signals` database and an `mt5_app` user scoped to only that database — the app never connects as `root`.
-
-2. **Set up the Python environment and `.env`**
-   ```bash
-   python -m venv venv
-   venv\Scripts\activate        # Windows; use `source venv/bin/activate` on macOS/Linux
-   pip install -r requirements.txt
-   copy .env.example .env      # then fill in real values — never edit .env.example itself
-   ```
-   In `.env`, set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` to match what you created in step 1 (e.g. `DB_USER=mt5_app`, `DB_NAME=mt5_signals`).
-
-3. **Run the migration** — creates all 5 tables plus the seed `strategy` row:
-   ```bash
-   alembic upgrade head
-   ```
-   Whenever `ai/models.py` changes later, generate and apply a new migration instead of hand-editing the database:
-   ```bash
-   alembic revision --autogenerate -m "describe the change"
-   alembic upgrade head
-   ```
-
 ## Getting Started
 
-1. **Run the analysis server** (after completing [Database Setup](#database-setup) and activating the venv)
+1. **Run the analysis server**
    ```bash
+   pip install -r requirements.txt
+   cp .env.example .env   # then fill in real values
+   export $(grep -v '^#' .env | xargs)   # or use a tool like python-dotenv/direnv
    python ai/analyze.py
    ```
-   `.env` is loaded automatically via `python-dotenv` — no manual `export` needed. The server listens on `0.0.0.0:5000`.
+   The server listens on `0.0.0.0:5000`.
 
 2. **Install the EA**
    - Copy `mt5/experts/mt5signal_ai.mq5` into your MT5 `MQL5/Experts` folder.
@@ -190,16 +142,22 @@ No secrets are hardcoded in source. Set them via EA inputs (MQL5) and environmen
 
 `InpBotToken` and `InpChatId` default to empty strings — the EA won't send Telegram messages until you fill them in.
 
-**`ai/analyze.py` / `ai/models.py`** — read from environment variables, auto-loaded from `.env` via `python-dotenv` (see `.env.example`):
+**`ai/analyze.py`** — set as environment variables before starting the server (see `.env.example`):
 | Variable | Purpose |
 |---|---|
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` / `TELEGRAM_CHAT_ID_TESTING` | Telegram credentials |
 | `GEMINI_API_KEY` | Gemini API key |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | MySQL connection (see [Database Setup](#database-setup)) |
 
-Both `ai/analyze.py` and `ai/models.py` raise `RuntimeError` at import time if any of their required variables are missing — this is intentional fail-fast behavior, not a bug, so a misconfigured deployment can't silently run half-broken.
+The server raises `RuntimeError` at startup if any of these are missing, e.g.:
+```bash
+export TELEGRAM_BOT_TOKEN="..."
+export TELEGRAM_CHAT_ID="..."
+export TELEGRAM_CHAT_ID_TESTING="..."
+export GEMINI_API_KEY="..."
+python ai/analyze.py
+```
 
-⚠️ **Never put real values in `.env.example`** — only in `.env` (gitignored). If a real secret ever ends up committed or pasted somewhere it shouldn't be, treat it as compromised and rotate it immediately (regenerate the Telegram bot token via [@BotFather](https://t.me/BotFather), issue a new Gemini API key, and change the MySQL user's password via `ALTER USER`).
+⚠️ The token and key that were previously hardcoded in this repo's history should be considered compromised — rotate them (regenerate the Telegram bot token via [@BotFather](https://t.me/BotFather) and issue a new Gemini API key) rather than reusing the old values.
 
 ## API Documentation
 
@@ -254,10 +212,7 @@ Backed by an hourly in-memory cache of the ForexFactory weekly XML calendar, fil
 ## Future Improvements
 
 - Decide whether M15 SAR/MACD alignment should be an enforced entry filter, not just a display label.
-- **Wire `/analyze` to the database** — it currently only calls Gemini/Telegram; it needs to also call `insert_signal`/`insert_signal_indicator`/`insert_ai_analysis` from `ai/db.py` so incoming EA signals actually get persisted.
-- **Build the outcome evaluator** — a batch script (e.g. `ai/evaluate_outcomes.py`) that walks MT5 history forward from each un-evaluated signal's `signal_bar_time` to determine TP/SL hit, writing `signal_outcome` rows via `insert_signal_outcome`.
-- **Build the report engine** — queries joining `signal` + `signal_outcome` + `ai_analysis` to compute win rate, profit factor, and expectancy, broken down by strategy/session/signal type/AI decision.
-- **Production hosting on Windows Server** — run behind **Waitress** (production WSGI server; Flask's dev server and gunicorn aren't suitable on Windows) wrapped as a Windows Service via **NSSM**, with log rotation and a `/health` endpoint.
+- Persist signals/AI verdicts/outcomes to a real datastore for win-rate and performance analytics.
 - Containerize `ai/analyze.py` (Docker) for easier deployment instead of a fixed LAN IP.
 - Add automated tests for the Flask service and a way to dry-run the EA's message formatting.
 

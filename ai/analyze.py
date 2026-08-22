@@ -1,6 +1,5 @@
 import logging
 import os
-from dotenv import load_dotenv
 from google import genai
 from google.genai import errors as genai_errors
 import requests
@@ -8,8 +7,6 @@ import xml.etree.ElementTree as ET
 from flask import Flask, request, jsonify
 from datetime import datetime, timezone, timedelta
 import time as time_module
-
-load_dotenv()  # loads .env into os.environ if present; no-op otherwise
 
 logging.basicConfig(
     level=logging.INFO,
