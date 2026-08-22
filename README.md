@@ -264,3 +264,4 @@ Backed by an hourly in-memory cache of the ForexFactory weekly XML calendar, fil
 ## License
 
 MIT — see [LICENSE](LICENSE).
+claude --resume 1ba6c8c6-88e2-450b-8746-6ed1f78e716f
