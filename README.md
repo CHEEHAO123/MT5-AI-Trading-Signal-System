@@ -1,8 +1,8 @@
 # MT5 AI Trading Signal System
 
-An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip + MA20 + MACD confirmation), pushes alerts to Telegram, and forwards enriched market context to a Python/Flask service that asks Google Gemini for a second opinion before the trade is acted on manually.
+This project watches the price of Gold (XAUUSD) on the MT5 trading platform, and automatically spots moments when the price looks like it's about to turn around and reverse direction. When it sees one, it instantly sends an alert to a Telegram chat — and at the same time, it hands the situation over to an AI (Google Gemini) to double-check whether the setup actually looks trustworthy. The trader then reads both the alert and the AI's opinion, and decides for themselves whether to place the trade.
 
-> **Note:** This EA is a *signal generator*, not an auto-trader — it never calls `OrderSend()`. Execution is manual, based on the Telegram alert and the AI's accept/reject verdict.
+> **Note:** This tool only *watches and alerts* — it never places trades on its own. A human always makes the final call, based on the Telegram alert and the AI's accept/reject opinion.
 
 ## Architecture
 
@@ -275,4 +275,3 @@ Backed by an hourly in-memory cache of the ForexFactory weekly XML calendar, fil
 ## License
 
 MIT — see [LICENSE](LICENSE).
-claude --resume 1ba6c8c6-88e2-450b-8746-6ed1f78e716f
