@@ -10,7 +10,7 @@ An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip +
 
 ![EA input parameters](images/EAInput.png)
 
-**EA running live on an XAUUSD M5 chart** — MA20 (blue line) and Parabolic SAR (green dots) driving signal detection, with MACD and Stochastic in the lower panels:
+**EA running live on an XAUUSD M5 chart** — MA20 (blue line) and Parabolic SAR (green dots) driving signal detection, with MACD in the lower panel, alongside the EA's `Common` tab (name, author, algo-trading permissions):
 
 ![EA attached to an XAUUSD M5 chart](images/mt5.png)
 
