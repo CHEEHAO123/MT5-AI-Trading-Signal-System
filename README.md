@@ -4,7 +4,7 @@ An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip +
 
 > **Note:** This EA is a *signal generator*, not an auto-trader — it never calls `OrderSend()`. Execution is manual, based on the Telegram alert and the AI's accept/reject verdict.
 
-## Screenshots
+## Project Screenshots
 
 **EA input parameters** — set when attaching the EA to a chart (Telegram bot token, chat ID, analysis server URL, live-mode toggle):
 
