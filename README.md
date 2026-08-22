@@ -4,6 +4,20 @@ An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip +
 
 > **Note:** This EA is a *signal generator*, not an auto-trader — it never calls `OrderSend()`. Execution is manual, based on the Telegram alert and the AI's accept/reject verdict.
 
+## Screenshots
+
+**EA input parameters** — set when attaching the EA to a chart (Telegram bot token, chat ID, analysis server URL, live-mode toggle):
+
+![EA input parameters](images/EAInput.png)
+
+**EA running live on an XAUUSD M5 chart** — MA20 (blue line) and Parabolic SAR (green dots) driving signal detection, with MACD and Stochastic in the lower panels:
+
+![EA attached to an XAUUSD M5 chart](images/mt5.png)
+
+**Real signal + AI verdict, end to end** — the raw Telegram alert (signal type, per-indicator ✅/❌ breakdown, session, SL/TP) immediately followed by Gemini's verdict. In this example the M5 signal fired, but the AI **rejected** it because the M15 timeframe's SAR and MACD disagreed with the M5 direction:
+
+![Telegram signal alert followed by the AI's accept/reject verdict](images/telegramSignal.png)
+
 ## Architecture
 
 ```mermaid
@@ -271,6 +285,10 @@ Backed by an hourly in-memory cache of the ForexFactory weekly XML calendar, fil
 - Persist signals/AI verdicts/outcomes to a real datastore for win-rate and performance analytics.
 - Containerize `ai/analyze.py` (Docker) for easier deployment instead of a fixed LAN IP.
 - Add automated tests for the Flask service and a way to dry-run the EA's message formatting.
+
+## Author
+
+Foong Chee Hao
 
 ## License
 
