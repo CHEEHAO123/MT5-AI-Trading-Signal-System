@@ -111,12 +111,26 @@ MT5 Sys/
 ## Getting Started
 
 1. **Run the analysis server**
+
+   macOS/Linux/Git Bash:
    ```bash
    pip install -r requirements.txt
    cp .env.example .env   # then fill in real values
    export $(grep -v '^#' .env | xargs)   # or use a tool like python-dotenv/direnv
    python ai/analyze.py
    ```
+
+   Windows PowerShell:
+   ```powershell
+   pip install -r requirements.txt
+   Copy-Item .env.example .env   # then fill in real values
+   Get-Content .env | Where-Object { $_ -match '^[^#]' -and $_.Trim() -ne "" } | ForEach-Object {
+       $name, $value = $_ -split "=", 2
+       Set-Item -Path "Env:$name" -Value $value
+   }
+   python ai/analyze.py
+   ```
+
    The server listens on `0.0.0.0:5000`.
 
 2. **Install the EA**
