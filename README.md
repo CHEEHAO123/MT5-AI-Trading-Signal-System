@@ -175,23 +175,65 @@ python ai/analyze.py
 
 ## API Documentation
 
+### `GET /analyze`
+Plain liveness check — no auth, no body. Returns `200 {"status": "ok", "message": "server running"}`. Useful for confirming the server is up before pointing the EA at it.
+
 ### `POST /analyze`
-Consumed by the EA after a signal fires. Body (JSON):
+Called by the EA (`SendToExtForAI()` in `mt5signal_ai.mq5`) immediately after a signal fires, in parallel with the Telegram alert. Builds the Gemini prompt from this payload and relays the accept/reject verdict to Telegram — it does **not** return the verdict in the HTTP response (see below).
+
+**Request body** (JSON) — this is the *exact* contract the EA sends and `analyze()` reads; keep this in sync with both `SendToExtForAI()` (MQL5) and the `data.get(...)` calls at the top of `analyze()` (Python) if either side changes:
 
 ```json
 {
-  "symbol": "XAUUSD", "timeframe": "M5", "time": "...", "signal": "BUY",
-  "price": 0, "sl": 0, "tp": 0, "pips": 0, "spread": 0, "volatility": 0,
-  "market_regime": "Sideway|Not Sideway", "session": "...",
-  "m5":  { "ma20": 0, "sar": 0, "macd_main": 0, "macd_sig": 0, "macd_bull": true },
-  "m15": { "ma20": 0, "sar": 0, "macd_main": 0, "macd_sig": 0, "macd_bull": true },
-  "support_resistance": { "nearest_high": 0, "nearest_low": 0, "dist_to_high": 0, "dist_to_low": 0 },
-  "current_candle":  { "open": 0, "high": 0, "low": 0, "close": 0, "body_pct": 0, "wick_pct": 0 },
-  "previous_candle": { "open": 0, "high": 0, "low": 0, "close": 0, "body_pct": 0, "wick_pct": 0 },
-  "last_50_candles": { "hh_hl_count": 0, "lh_ll_count": 0, "range_high": 0, "range_low": 0, "range_size": 0, "atr_estimate": 0, "big_candles": 0, "breakouts": 0, "wick_rejections": 0 }
+  "symbol": "XAUUSD",
+  "timeframe": "M5",
+  "time": "2026.08.22 09:43",
+  "signal": "BUY",
+  "price": 2412.35,
+  "sl": 2410.85,
+  "tp": 2413.85,
+  "pips": 15.0,
+  "spread": 0.00025,
+  "volatility": 0.00185,
+  "session": "London",
+  "m5": {
+    "ma20": 2411.20, "sar": 2410.60,
+    "macd_main": 0.021500, "macd_sig": 0.018200, "macd_bull": true,
+    "macd_hist": 0.003300, "macd_hist_dir": 1.0,
+    "macd_hist_last5": [0.0005, 0.0012, 0.0021, 0.0028, 0.0033]
+  },
+  "m15": {
+    "ma20": 2409.80, "sar": 2408.40,
+    "macd_main": 0.045100, "macd_sig": 0.039800, "macd_bull": true,
+    "macd_hist": 0.005300, "macd_hist_dir": 1.0,
+    "macd_hist_last5": [0.0020, 0.0031, 0.0040, 0.0047, 0.0053]
+  },
+  "support_resistance": {
+    "resistance_level": 2415.50, "support_level": 2405.20,
+    "resistance_touch_count": 3, "support_touch_count": 2,
+    "resistance_rejection_count": 1, "support_rejection_count": 0,
+    "resistance_score": 9.0, "support_score": 4.0,
+    "dist_to_resistance": 31.5, "dist_to_support": 71.5
+  },
+  "current_candle":  { "open": 2411.80, "high": 2412.50, "low": 2411.60, "close": 2412.35, "body_pct": 62.0, "wick_pct": 38.0 },
+  "previous_candle": { "open": 2411.10, "high": 2411.95, "low": 2410.90, "close": 2411.80, "body_pct": 71.0, "wick_pct": 29.0 },
+  "last_50_candles": {
+    "hh_hl_count": 6, "lh_ll_count": 2,
+    "range_high": 2416.00, "range_low": 2404.50, "range_size": 11.50,
+    "atr_estimate": 0.00185, "big_candles": 4, "breakouts": 2, "wick_rejections": 3
+  }
 }
 ```
-Response: `{"status": "ok"}` (Gemini's 接受/拒绝 verdict is sent to Telegram, not returned in the HTTP response). Errors still respond `200` with `{"status": "error", ...}` so the EA doesn't log an HTTP failure.
+
+| Field group | Meaning |
+| :--- | :--- |
+| Top-level (`symbol`…`session`) | `timeframe` is always `"M5"` (M15 only appears nested under `m15`); `pips` is the SL→TP distance in pips (always equal since RR is fixed 1:1); `spread`/`volatility` are raw price units, not pips; `session` is one of Tokyo/London/New York/an overlap label from `GetSessionInfoEN()`. |
+| `m5` / `m15` | Indicator snapshot per timeframe. `macd_bull` is `macd_main > macd_sig`. `macd_hist_dir` is `1.0` (rising) or `-1.0` (falling). `macd_hist_last5` is oldest→current, always 5 values. |
+| `support_resistance` | `resistance_level`/`support_level` are price levels derived from the last 50 M5 candles' high/low; `*_touch_count`/`*_rejection_count` count how many times price approached/bounced off that level; `*_score` is `touches*2 + rejections*3`; `dist_to_*` is in pips. |
+| `current_candle` / `previous_candle` | OHLC of the signal candle and the one before it, plus body/wick as a percentage of the candle's total range. |
+| `last_50_candles` | Trend/volatility summary over the lookback window used for the "market regime" judgment in the Gemini prompt — `hh_hl_count`/`lh_ll_count` are structure counts (higher-high/higher-low vs lower-high/lower-low), `atr_estimate` mirrors top-level `volatility`. |
+
+**Response:** `200 {"status": "ok"}` on success — Gemini's 接受/拒绝 (accept/reject) verdict is pushed to Telegram, not returned in this response. On any failure (Gemini error, malformed body, etc.) it still responds `200 {"status": "error", "message": "..."}` rather than a 4xx/5xx, so the EA's `WebRequest` never sees an HTTP failure — that's a deliberate contract, not a bug (see [Reliability & Error Handling](#reliability--error-handling)).
 
 ### `GET /news`
 Query params: `send_telegram=1` (optional) — also pushes the week's summary to Telegram.
