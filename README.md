@@ -18,6 +18,10 @@ An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip +
 
 ![Telegram signal alert followed by the AI's accept/reject verdict](images/telegramSignal.png)
 
+**Weekly economic news calendar** — the `/news` endpoint's USD high/medium-impact ForexFactory events, pushed to Telegram (`send_telegram=1`):
+
+![Telegram weekly economic news calendar](images/news.png)
+
 ## Architecture
 
 ```mermaid
