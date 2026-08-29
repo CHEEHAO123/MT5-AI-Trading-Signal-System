@@ -1,6 +1,6 @@
 # MT5 AI Trading Signal System
 
-An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip + MA20 + MACD confirmation), pushes alerts to Telegram, and forwards enriched market context to a Python/Flask service that asks Google Gemini for a second opinion before the trade is acted on manually.
+An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip on M5 + MA20 Trend on M5, Stochastic Indicator on M15), pushes alerts to Telegram, and forwards enriched market context — including MACD momentum on M5/M15, informational only — to a Python/Flask service that asks Google Gemini for a second opinion before the trade is acted on manually.
 
 > **Note:** This EA is a *signal generator*, not an auto-trader — it never calls `OrderSend()`. Execution is manual, based on the Telegram alert and the AI's accept/reject verdict.
 
