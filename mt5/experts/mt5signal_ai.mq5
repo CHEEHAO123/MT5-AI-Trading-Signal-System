@@ -1,14 +1,15 @@
 //+------------------------------------------------------------------+
-//|  GoldMonitor.mq5                                                 |
-//|  Copyright: Chee Hao                                             |
+//|  GoldMonitor (mt5signal_ai.mq5)                                  |
+//|  Copyright 2026, Chee Hao                                        |
 //+------------------------------------------------------------------+
-#property copyright "Chee Hao"
-#property version   "2.10"
+#property copyright "Copyright 2026, Chee Hao"
+#property version   "3.00"
+#property description "XAUUSD M5 signal EA: SAR flip + MA20 trend, confirmed by M15 Stochastic(8,3,3); alerts to Telegram with an AI (Gemini) second opinion."
 #property strict
 
 input string InpBotToken       = ""; // Telegram Bot Token
 input string InpChatId         = ""; // Telegram Chat ID (Live Signals)
-input string InpServerBaseUrl = "http://127.0.0.1:5000/"; // Analysis server base URL (trailing slash required)
+input string InpServerBaseUrl = "http://127.0.0.1:5000/"; // Analysis server URL
 input bool   InpEnableNews      = true; // Enable news
 input bool   InpEnableAiAnalyze = false; // Enable AI analysis
 
