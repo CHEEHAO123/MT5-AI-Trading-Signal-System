@@ -6,7 +6,7 @@ An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip +
 
 ## Project Screenshots
 
-**EA input parameters** — set when attaching the EA to a chart (Telegram bot token, chat ID, analysis server URL, live-mode toggle):
+**EA input parameters** — set when attaching the EA to a chart (Telegram bot token, chat ID, analysis server URL, news/AI-analyze toggles):
 
 ![EA input parameters](images/EAInput.png)
 
@@ -14,7 +14,7 @@ An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip +
 
 ![EA attached to an XAUUSD M5 chart](images/mt5.png)
 
-**Real signal + AI verdict, end to end** — the raw Telegram alert (signal type, per-indicator ✅/❌ breakdown, session, SL/TP) immediately followed by Gemini's verdict. In this example the M5 signal fired, but the AI **rejected** it because the M15 timeframe's SAR and MACD disagreed with the M5 direction:
+**Real signal + AI verdict, end to end** — the raw Telegram alert (signal type, per-indicator ✅/❌ breakdown, session, SL/TP) immediately followed by Gemini's verdict. In this example the M5 signal fired, but the AI **rejected** it because the M15 timeframe's indicators disagreed with the M5 direction (screenshot predates the M15 SAR→Stochastic swap described below):
 
 ![Telegram signal alert followed by the AI's accept/reject verdict](images/telegramSignal.png)
 
@@ -28,7 +28,7 @@ An MT5 Expert Advisor that detects XAUUSD (Gold) M5 reversal signals (SAR flip +
 flowchart LR
     subgraph MT5["MetaTrader 5 Terminal"]
         EA["GoldMonitor EA\n(mt5/experts/mt5signal_ai.mq5)"]
-        IND["Indicators\nMA20 / SAR / MACD / ATR\n(M5 + M15)"]
+        IND["Indicators\nM5: MA20 / SAR / MACD / ATR\nM15: MA20 / MACD / Stochastic(8,3,3)"]
         IND --> EA
     end
 
@@ -51,7 +51,7 @@ flowchart LR
 
 ## Features
 
-- **Multi-timeframe signal detection** — Parabolic SAR flip + MA20 trend filter on M5, with MACD momentum confirmation on M5 and M15.
+- **Multi-timeframe signal detection** — Parabolic SAR flip + MA20 trend filter on M5, confirmed by M15 Stochastic(8,3,3) trend direction (%K vs %D) before a signal fires, with MACD momentum context on M5 and M15.
 - **Duplicate-signal guard** — tracks the last fired signal direction and the candle a SAR flip occurred on, to avoid repeat alerts within the same setup.
 - **Sideway/ranging filter** — flags choppy conditions using 20-candle range and MA20 slope so weak setups are labeled accordingly.
 - **Fixed 1:1 risk/reward SL & TP** — computed off the current SAR value with a pip buffer, with a minimum SL distance guard.
@@ -81,8 +81,8 @@ flowchart LR
 
 No orders are placed automatically. The flow per tick is:
 
-1. Read M5/M15 indicator buffers (MA20, SAR, MACD, ATR) and price.
-2. Check for a fresh SAR flip aligned with MA20 trend on M5 (`m5Buy` / `m5Sell`).
+1. Read M5/M15 indicator buffers (M5: MA20, SAR, MACD, ATR; M15: MA20, MACD, Stochastic(8,3,3)) and price.
+2. Check for a fresh SAR flip aligned with MA20 trend on M5, additionally confirmed by the M15 Stochastic trend (`m5Buy` requires M15 %K > %D / uptrend, `m5Sell` requires M15 %K < %D / downtrend).
 3. If a new signal (different from `lastSignalType`) and the SL distance passes the minimum-distance guard, compute SL/TP (1:1 R:R).
 4. Send the Telegram alert immediately.
 5. Load the fuller `MarketContext` (last 50 candles, candle stats) and POST it to `/analyze`.
@@ -154,7 +154,7 @@ MT5 Sys/
 2. **Install the EA**
    - Copy `mt5/experts/mt5signal_ai.mq5` into your MT5 `MQL5/Experts` folder.
    - Compile it in MetaEditor.
-   - Attach it to an XAUUSD chart (M5) and fill in `InpBotToken`, `InpChatId`, and `InpAiServerBaseUrl` in the EA's **Inputs** tab.
+   - Attach it to an XAUUSD chart (M5) and fill in `InpBotToken`, `InpChatId`, and `InpServerBaseUrl` in the EA's **Inputs** tab (leave `InpEnableNews`/`InpEnableAiAnalyze` at their defaults, or disable either to skip that HTTP call).
 
 3. **Whitelist URLs** in MT5 (see [Prerequisites](#prerequisites)) so `WebRequest` calls to Telegram and the analysis server succeed.
 
@@ -169,8 +169,9 @@ No secrets are hardcoded in source. Set them via EA inputs (MQL5) and environmen
 |---|---|
 | `InpBotToken` | Telegram bot token |
 | `InpChatId` | Telegram chat/channel to post signals to |
-| `InpAiServerBaseUrl` | Analysis server base URL, trailing slash required (default `http://127.0.0.1:5000/` — change to your own deployment; the EA appends `analyze` / `news?send_telegram=1`) |
-| `InpLiveMode` | `true` = send real Telegram/AI HTTP calls, `false` = log only (Experts log), no network calls |
+| `InpServerBaseUrl` | Analysis server base URL, trailing slash required (default `http://127.0.0.1:5000/` — change to your own deployment; the EA appends `analyze` / `news?send_telegram=1`) |
+| `InpEnableNews` | `true` = fetch/push the ForexFactory news summary to Telegram, `false` = log only (Experts log), no `/news` call |
+| `InpEnableAiAnalyze` | `true` = POST signal context to `/analyze` for a Gemini verdict, `false` = log only (Experts log), no `/analyze` call |
 
 `InpBotToken` and `InpChatId` default to empty strings — the EA won't send Telegram messages until you fill them in.
 
@@ -221,10 +222,11 @@ Called by the EA (`SendToExtForAI()` in `mt5signal_ai.mq5`) immediately after a 
     "macd_hist_last5": [0.0005, 0.0012, 0.0021, 0.0028, 0.0033]
   },
   "m15": {
-    "ma20": 2409.80, "sar": 2408.40,
+    "ma20": 2409.80,
     "macd_main": 0.045100, "macd_sig": 0.039800, "macd_bull": true,
     "macd_hist": 0.005300, "macd_hist_dir": 1.0,
-    "macd_hist_last5": [0.0020, 0.0031, 0.0040, 0.0047, 0.0053]
+    "macd_hist_last5": [0.0020, 0.0031, 0.0040, 0.0047, 0.0053],
+    "stoch_main": 78.40, "stoch_sig": 65.10, "stoch_trend": "Uptrend"
   },
   "support_resistance": {
     "resistance_level": 2415.50, "support_level": 2405.20,
@@ -246,7 +248,7 @@ Called by the EA (`SendToExtForAI()` in `mt5signal_ai.mq5`) immediately after a 
 | Field group | Meaning |
 | :--- | :--- |
 | Top-level (`symbol`…`session`) | `timeframe` is always `"M5"` (M15 only appears nested under `m15`); `pips` is the SL→TP distance in pips (always equal since RR is fixed 1:1); `spread`/`volatility` are raw price units, not pips; `session` is one of Tokyo/London/New York/an overlap label from `GetSessionInfoEN()`. |
-| `m5` / `m15` | Indicator snapshot per timeframe. `macd_bull` is `macd_main > macd_sig`. `macd_hist_dir` is `1.0` (rising) or `-1.0` (falling). `macd_hist_last5` is oldest→current, always 5 values. |
+| `m5` / `m15` | Indicator snapshot per timeframe. `macd_bull` is `macd_main > macd_sig`. `macd_hist_dir` is `1.0` (rising) or `-1.0` (falling). `macd_hist_last5` is oldest→current, always 5 values. `m5` includes a `sar` field (M5 Parabolic SAR, used for signal timing); `m15` has no `sar` field (removed) but instead carries `stoch_main`/`stoch_sig` (M15 Stochastic(8,3,3) %K/%D) and `stoch_trend` (`"Uptrend"` if `stoch_main > stoch_sig`, else `"Downtrend"`) — this M15 Stochastic trend is also a hard entry filter enforced in the EA before `m5Buy`/`m5Sell` fire (see [Order Flow](#order-flow)), not just informational context for Gemini. |
 | `support_resistance` | `resistance_level`/`support_level` are price levels derived from the last 50 M5 candles' high/low; `*_touch_count`/`*_rejection_count` count how many times price approached/bounced off that level; `*_score` is `touches*2 + rejections*3`; `dist_to_*` is in pips. |
 | `current_candle` / `previous_candle` | OHLC of the signal candle and the one before it, plus body/wick as a percentage of the candle's total range. |
 | `last_50_candles` | Trend/volatility summary over the lookback window used for the "market regime" judgment in the Gemini prompt — `hh_hl_count`/`lh_ll_count` are structure counts (higher-high/higher-low vs lower-high/lower-low), `atr_estimate` mirrors top-level `volatility`. |
@@ -280,12 +282,12 @@ Backed by an hourly in-memory cache of the ForexFactory weekly XML calendar, fil
 
 - **Manual execution over auto-trading** — the EA only signals and asks Gemini for a sanity check; the human stays in the loop for order placement.
 - **Fixed 1:1 risk/reward** — SL and TP are always equidistant from entry, computed from the current SAR value plus a pip buffer, simplifying position sizing.
-- **AI as a secondary filter, not a gate** — the Telegram alert and `/analyze` call both fire once M5 conditions are met; the M15 SAR/MACD marks shown in the alert are informational context passed to Gemini rather than a hard entry filter in the EA itself.
-- **Live-mode kill switch** — `InpLiveMode` is a runtime `input bool` checked with a plain `if`, not a preprocessor `#ifdef`. (An earlier version used `#define LIVE_MODE true` + `#ifdef LIVE_MODE`, which is always true regardless of the macro's value since `#ifdef` only tests whether a macro is defined — that toggle never actually worked.)
+- **AI as a secondary filter, not a gate** — the Telegram alert and `/analyze` call both fire once M5 SAR-flip/MA20 conditions plus the M15 Stochastic trend confirmation are met; M15 MACD (still shown in the alert and payload) remains informational context passed to Gemini rather than an additional hard entry filter in the EA itself.
+- **Independent news/AI kill switches** — `InpEnableNews` and `InpEnableAiAnalyze` are separate runtime `input bool`s checked with plain `if`s (replacing an earlier single `InpLiveMode` flag), so the trader can disable the ForexFactory news push and the Gemini AI-analyze call independently without touching the core Telegram signal alert, which always fires when live (outside the Strategy Tester).
 
 ## Future Improvements
 
-- Decide whether M15 SAR/MACD alignment should be an enforced entry filter, not just a display label.
+- Decide whether M15 MACD alignment should also be an enforced entry filter (M15 Stochastic trend already is, as of the SAR→Stochastic swap on M15).
 - Persist signals/AI verdicts/outcomes to a real datastore for win-rate and performance analytics.
 - Containerize `ai/analyze.py` (Docker) for easier deployment instead of a fixed LAN IP.
 - Add automated tests for the Flask service and a way to dry-run the EA's message formatting.
