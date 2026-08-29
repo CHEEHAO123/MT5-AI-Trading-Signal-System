@@ -8,8 +8,9 @@
 
 input string InpBotToken       = ""; // Telegram Bot Token
 input string InpChatId         = ""; // Telegram Chat ID (Live Signals)
-input string InpAiServerBaseUrl = "http://127.0.0.1:5000/"; // Analysis server base URL (trailing slash required)
-input bool   InpLiveMode       = true; // Enable live Telegram/AI HTTP calls (false = log only)
+input string InpServerBaseUrl = "http://127.0.0.1:5000/"; // Analysis server base URL (trailing slash required)
+input bool   InpEnableNews      = true; // Enable news
+input bool   InpEnableAiAnalyze = false; // Enable AI analysis
 
 int lastSignalType = 0;
 
@@ -173,6 +174,11 @@ void OnTick()
         double slDistancePoints = MathAbs(price - slBuy);
         if (slDistancePoints < minSLPoints) { Print("BUY blocked: SL too small = ", slDistancePoints); return; }
 
+        //20260829 Chee Hao : To have pre-Message before full message
+        //Goal : to notificate the user
+        String prevMsg = "🟢🟢🟢 GOLD - BUY NOW \n";
+        SendTelegram(prevMsg);
+
         string msg = BuildSignalMessage(
             true, price, slBuy, tpBuy, pipsToBuyTP,
             macdMain, macdSig, macd15Main, macd15Sig, sar15,
@@ -201,6 +207,11 @@ void OnTick()
     {
         double slDistancePoints = MathAbs(slSell - price);
         if (slDistancePoints < minSLPoints) { Print("SELL blocked: SL too small = ", slDistancePoints); return; }
+
+        //20260829 Chee Hao : To have pre-Message before full message
+        //Goal : to notificate the user
+        String prevMsg = "🔴🔴🔴 GOLD - SELL NOW \n";
+        SendTelegram(prevMsg);
 
         string msg = BuildSignalMessage(
             false, price, slSell, tpSell, pipsToSellTP,
@@ -266,7 +277,7 @@ bool GetMacdHistData(MacdHistData &out)
 //+------------------------------------------------------------------+
 string BuildSignalMessage(
     bool   isBuy,
-    double price, double sl, double tp, double pips,
+    double price , double sl, double tp, double pips,
     double macdMain, double macdSig,
     double macd15Main, double macd15Sig,
     double sar15,
@@ -352,12 +363,6 @@ bool SendTelegram(string message)
         return true;
     }
 
-    if (!InpLiveMode)
-    {
-        Print("📨 TELEGRAM (live mode off): ", message);
-        return true;
-    }
-
     string url = "https://api.telegram.org/bot" + InpBotToken + "/sendMessage";
 
     // Build JSON body instead of URL-encoded GET
@@ -409,9 +414,9 @@ bool SendToExtForAI(
         return true;
     }
 
-    if (!InpLiveMode)
+    if (!InpEnableAiAnalyze)
     {
-        Print("🤖 AI SKIP (live mode off): signal=", signal, " price=", DoubleToString(price, 2));
+        Print("🤖 AI SKIP (AI analyze disabled): signal=", signal, " price=", DoubleToString(price, 2));
         return true;
     }
 
@@ -510,7 +515,7 @@ bool SendToExtForAI(
         + "}"
         + "}";
 
-    string url        = InpAiServerBaseUrl + "analyze";
+    string url        = InpServerBaseUrl + "analyze";
     char   post[], result[];
     string reqHeaders  = "Content-Type: application/json\r\n";
     string respHeaders;
@@ -686,14 +691,14 @@ bool FetchAndSendNews()
         return true;
     }
 
-    if (!InpLiveMode)
+    if (!InpEnableNews)
     {
-        Print("📰 NEWS SKIP (live mode off)");
+        Print("📰 NEWS SKIP (news disabled)");
         return true;
     }
 
     // ?send_telegram=1  tells Flask to also push the summary to Telegram
-    string url = InpAiServerBaseUrl + "news?send_telegram=1";
+    string url = InpServerBaseUrl + "news?send_telegram=1";
 
     char   post[];
     char   result[];
