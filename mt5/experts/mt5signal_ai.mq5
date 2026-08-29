@@ -18,9 +18,9 @@ int handleMA20_M5;
 int handleSAR_M5;
 int handleMACD_M5;
 int handleMACD_M15;
-int handleSAR_M15;
 int handleMA20_M15;
 int handleATR_M5;
+int handleStoch_M15;
 
 struct MarketContext
 {
@@ -51,15 +51,15 @@ int OnInit()
     handleSAR_M5   = iSAR (_Symbol, PERIOD_M5,  0.02, 0.2);
     handleMA20_M5  = iMA  (_Symbol, PERIOD_M5,  20, 0, MODE_SMA, PRICE_CLOSE);
     handleMACD_M5  = iMACD(_Symbol, PERIOD_M5,  12, 26, 9, PRICE_CLOSE);
-    handleSAR_M15  = iSAR (_Symbol, PERIOD_M15, 0.02, 0.2);
     handleMA20_M15 = iMA  (_Symbol, PERIOD_M15, 20, 0, MODE_SMA, PRICE_CLOSE);
     handleMACD_M15 = iMACD(_Symbol, PERIOD_M15, 12, 26, 9, PRICE_CLOSE);
     handleATR_M5   = iATR (_Symbol, PERIOD_M5,  14);
+    handleStoch_M15 = iStochastic(_Symbol, PERIOD_M15, 8, 3, 3, MODE_SMA, STO_LOWHIGH);
 
     if (handleMA20_M5  == INVALID_HANDLE || handleSAR_M5   == INVALID_HANDLE ||
        handleMACD_M5  == INVALID_HANDLE || handleMACD_M15 == INVALID_HANDLE ||
-       handleSAR_M15  == INVALID_HANDLE || handleMA20_M15 == INVALID_HANDLE ||
-       handleATR_M5   == INVALID_HANDLE)
+       handleMA20_M15 == INVALID_HANDLE ||
+       handleATR_M5   == INVALID_HANDLE || handleStoch_M15 == INVALID_HANDLE)
     {
         Print("Failed to create indicator handles!");
         return INIT_FAILED;
@@ -72,12 +72,12 @@ int OnInit()
 void OnDeinit(const int reason)
 {
     IndicatorRelease(handleSAR_M5);
-    IndicatorRelease(handleSAR_M15);
     IndicatorRelease(handleMACD_M5);
     IndicatorRelease(handleMACD_M15);
     IndicatorRelease(handleMA20_M5);
     IndicatorRelease(handleMA20_M15);
     IndicatorRelease(handleATR_M5);
+    IndicatorRelease(handleStoch_M15);
     SendTelegram("🛑 EA 已被停止。(第二版本 MT5)");
 }
 
@@ -97,10 +97,11 @@ void OnTick()
     // ── signal actually fires. This removes 4x CopyBuffer(...,5,...)     ──
     // ── calls + array math from every single tick.                      ──
     double ma20Buf[1], ma20_15Buf[1];
-    double sar1Buf[1], sar2Buf[1], sar15Buf[1];
+    double sar1Buf[1], sar2Buf[1];
     double macdMainBuf[1], macdSigBuf[1];
     double macd15MainBuf[1], macd15SigBuf[1];
     double atrBuf[1];
+    double stoch15MainBuf[1], stoch15SigBuf[1];
 
     if (CopyBuffer(handleMA20_M5,  0, 0,  1, ma20Buf)        < 1) return;
     if (CopyBuffer(handleSAR_M5,   0, 0,  1, sar1Buf)        < 1) return;
@@ -109,9 +110,10 @@ void OnTick()
     if (CopyBuffer(handleMACD_M5,  1, 0,  1, macdSigBuf)     < 1) return;
     if (CopyBuffer(handleMACD_M15, 0, 0,  1, macd15MainBuf)  < 1) return;
     if (CopyBuffer(handleMACD_M15, 1, 0,  1, macd15SigBuf)   < 1) return;
-    if (CopyBuffer(handleSAR_M15,  0, 0,  1, sar15Buf)       < 1) return;
     if (CopyBuffer(handleMA20_M15, 0, 0,  1, ma20_15Buf)     < 1) return;
     if (CopyBuffer(handleATR_M5,   0, 0,  1, atrBuf)         < 1) return;
+    if (CopyBuffer(handleStoch_M15, 0, 0, 1, stoch15MainBuf) < 1) return;
+    if (CopyBuffer(handleStoch_M15, 1, 0, 1, stoch15SigBuf)  < 1) return;
 
     double ma20       = ma20Buf[0];
     double sar1       = sar1Buf[0];
@@ -120,9 +122,10 @@ void OnTick()
     double macdSig    = macdSigBuf[0];
     double macd15Main = macd15MainBuf[0];
     double macd15Sig  = macd15SigBuf[0];
-    double sar15      = sar15Buf[0];
     double ma20_15    = ma20_15Buf[0];
     double atr        = atrBuf[0];
+    double stoch15Main = stoch15MainBuf[0];
+    double stoch15Sig  = stoch15SigBuf[0];
 
     double point   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
     double pipSize = point * 10;
@@ -147,8 +150,11 @@ void OnTick()
     bool sarJustFlippedBearish = (sar1 > price) && (sar2 < prevClose)
                                  && (sarFlipTimeBear != currentCandle);
 
-    bool m5Buy  = (price > ma20) && sarJustFlippedBullish;
-    bool m5Sell = (price < ma20) && sarJustFlippedBearish;
+    bool m15StochUp   = stoch15Main > stoch15Sig;
+    bool m15StochDown = stoch15Main < stoch15Sig;
+
+    bool m5Buy  = (price > ma20) && sarJustFlippedBullish && m15StochUp;
+    bool m5Sell = (price < ma20) && sarJustFlippedBearish && m15StochDown;
 
     // BUGFIX #2: only clear lastSignalType once we've moved to a new candle.
     // Previously this reset on every tick where m5Buy/m5Sell happened to be
@@ -181,7 +187,8 @@ void OnTick()
 
         string msg = BuildSignalMessage(
             true, price, slBuy, tpBuy, pipsToBuyTP,
-            macdMain, macdSig, macd15Main, macd15Sig, sar15,
+            macdMain, macdSig, macd15Main, macd15Sig,
+            stoch15Main, stoch15Sig,
             sidewayLabel
         );
         SendTelegram(msg);
@@ -195,7 +202,8 @@ void OnTick()
                 "BUY", price, slBuy, tpBuy, pipsToBuyTP,
                 spread, atr, GetSessionInfoEN(),
                 ma20, sar1, macdMain, macdSig, hist.m5Hist,  hist.m5HistDir,  hist.m5Hist5,
-                ma20_15, sar15, macd15Main, macd15Sig, hist.m15Hist, hist.m15HistDir, hist.m15Hist5,
+                ma20_15, macd15Main, macd15Sig, hist.m15Hist, hist.m15HistDir, hist.m15Hist5,
+                stoch15Main, stoch15Sig,
                 highest, lowest, ctx
             );
         lastSignalType   = 1;
@@ -215,7 +223,8 @@ void OnTick()
 
         string msg = BuildSignalMessage(
             false, price, slSell, tpSell, pipsToSellTP,
-            macdMain, macdSig, macd15Main, macd15Sig, sar15,
+            macdMain, macdSig, macd15Main, macd15Sig,
+            stoch15Main, stoch15Sig,
             sidewayLabel
         );
         SendTelegram(msg);
@@ -229,7 +238,8 @@ void OnTick()
                 "SELL", price, slSell, tpSell, pipsToSellTP,
                 spread, atr, GetSessionInfoEN(),
                 ma20, sar1, macdMain, macdSig, hist.m5Hist,  hist.m5HistDir,  hist.m5Hist5,
-                ma20_15, sar15, macd15Main, macd15Sig, hist.m15Hist, hist.m15HistDir, hist.m15Hist5,
+                ma20_15, macd15Main, macd15Sig, hist.m15Hist, hist.m15HistDir, hist.m15Hist5,
+                stoch15Main, stoch15Sig,
                 highest, lowest, ctx
             );
         lastSignalType   = -1;
@@ -280,7 +290,7 @@ string BuildSignalMessage(
     double price , double sl, double tp, double pips,
     double macdMain, double macdSig,
     double macd15Main, double macd15Sig,
-    double sar15,
+    double stoch15Main, double stoch15Sig,
     string sidewayLabel
 )
 {
@@ -292,8 +302,10 @@ string BuildSignalMessage(
                              : ((macdMain   < macdSig)   ? chkY : chkN);
     string m15Mark  = isBuy ? ((macd15Main > macd15Sig) ? chkY : chkN)
                              : ((macd15Main < macd15Sig) ? chkY : chkN);
-    string sar15Mark = isBuy ? ((sar15 < price) ? chkY : chkN)
-                              : ((sar15 > price) ? chkY : chkN);
+
+    // Stochastic(8,3,3): %K (main) above %D (signal) = uptrend, below = downtrend
+    string m15StochMark  = isBuy ? ((stoch15Main > stoch15Sig) ? chkY : chkN)
+                                      : ((stoch15Main < stoch15Sig) ? chkY : chkN);
 
     string sessionLabel = GetSessionInfo();
     string header   = isBuy ? "🟢🟢🟢 BUY - GOLD" : "🔴🔴🔴 SELL - GOLD";
@@ -305,7 +317,7 @@ string BuildSignalMessage(
                + "M5-MA20      :" + chkY                                       + nl
                + "M5-SAR         :" + chkY                                     + nl
                + "M5-MACD     :"  + m5Mark                                     + nl
-               + "M15-SAR       :" + sar15Mark                                 + nl
+               + "M15-Stoch   :" + m15StochMark                              + nl
                + "M15-MACD   :"   + m15Mark                                    + nl
                + "Market           :" + sidewayLabel                          + nl
                + "─────Risk TP:SL 1:1─────"                                    + nl
@@ -402,8 +414,9 @@ bool SendToExtForAI(
     double spread,  double atr,     string session,
     double m5ma20,  double m5sar,   double m5macdMain,  double m5macdSig,
     double m5macdHist,  double m5macdHistDir,  double &m5Hist5[],
-    double m15ma20, double m15sar,  double m15macdMain, double m15macdSig,
+    double m15ma20, double m15macdMain, double m15macdSig,
     double m15macdHist, double m15macdHistDir, double &m15Hist5[],
+    double m15stochMain, double m15stochSig,
     double nearHigh, double nearLow,
     MarketContext &ctx
 )
@@ -466,13 +479,15 @@ bool SendToExtForAI(
         + "},"
         + "\"m15\":{"
         +   "\"ma20\":"           + DoubleToString(m15ma20,     2)    + ","
-        +   "\"sar\":"            + DoubleToString(m15sar,      2)    + ","
         +   "\"macd_main\":"      + DoubleToString(m15macdMain, 6)    + ","
         +   "\"macd_sig\":"       + DoubleToString(m15macdSig,  6)    + ","
         +   "\"macd_bull\":"      + (m15macdMain > m15macdSig ? "true" : "false") + ","
         +   "\"macd_hist\":"      + DoubleToString(m15macdHist, 6)    + ","
         +   "\"macd_hist_dir\":"  + DoubleToString(m15macdHistDir, 1) + ","
-        +   "\"macd_hist_last5\":" + m15HistArr
+        +   "\"macd_hist_last5\":" + m15HistArr                       + ","
+        +   "\"stoch_main\":"     + DoubleToString(m15stochMain, 2)   + ","
+        +   "\"stoch_sig\":"      + DoubleToString(m15stochSig,  2)   + ","
+        +   "\"stoch_trend\":\"" + (m15stochMain > m15stochSig ? "Uptrend" : "Downtrend") + "\""
         + "},"
         + "\"support_resistance\":{"
         +   "\"resistance_level\":"         + DoubleToString(ctx.resistanceLevel, 2)  + ","

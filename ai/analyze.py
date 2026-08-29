@@ -142,13 +142,15 @@ def analyze():
     # ── M15 indicators ──
     m15            = data.get("m15") or {}
     m15_ma20       = m15.get("ma20",      "")
-    m15_sar        = m15.get("sar",       "")
     m15_macd_main  = m15.get("macd_main", "")
     m15_macd_sig   = m15.get("macd_sig",  "")
     m15_macd_bull  = m15.get("macd_bull", False)
     m15_macd_hist  = m15.get("macd_hist",       "")     # NEW
     m15_macd_hdir  = m15.get("macd_hist_dir",   "")     # NEW
     m15_macd_h5    = m15.get("macd_hist_last5", [])     # NEW
+    m15_stoch_main = m15.get("stoch_main",      "")
+    m15_stoch_sig  = m15.get("stoch_sig",       "")
+    m15_stoch_trend = m15.get("stoch_trend",    "")
 
     # ── Support / Resistance ──
     sr                    = data.get("support_resistance") or {}
@@ -244,6 +246,7 @@ def analyze():
          - M5 Structure
          - MACD Momentum
          - M15 Alignment
+         - M15 Stochastic Trend
          - SAR Timing
       4. Session:
          -London = favorable
@@ -273,12 +276,12 @@ def analyze():
 
     M15 Indicators:
     - MA20          : {m15_ma20}
-    - SAR           : {m15_sar}
     - MACD Main     : {m15_macd_main}
     - MACD Sig      : {m15_macd_sig}
     - MACD Dir      : {m15_macd_dir}
     - MACD Histogram: {m15_macd_hist}  ({m15_hist_dir_str})
     - Hist Last 5   : {m15_hist5_str}
+    - Stochastic(8,3,3): Main={m15_stoch_main}  Sig={m15_stoch_sig}  ({m15_stoch_trend})
 
     Support / Resistance:
     - Resistance Level    : {resistance_level}  ({dist_to_resistance} pips away) 
