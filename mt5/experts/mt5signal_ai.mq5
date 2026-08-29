@@ -182,7 +182,7 @@ void OnTick()
 
         //20260829 Chee Hao : To have pre-Message before full message
         //Goal : to notificate the user
-        String prevMsg = "🟢🟢🟢 GOLD - BUY NOW \n";
+        string prevMsg = "🟢🟢🟢 GOLD - BUY NOW \n";
         SendTelegram(prevMsg);
 
         string msg = BuildSignalMessage(
@@ -218,7 +218,7 @@ void OnTick()
 
         //20260829 Chee Hao : To have pre-Message before full message
         //Goal : to notificate the user
-        String prevMsg = "🔴🔴🔴 GOLD - SELL NOW \n";
+        string prevMsg = "🔴🔴🔴 GOLD - SELL NOW \n";
         SendTelegram(prevMsg);
 
         string msg = BuildSignalMessage(
