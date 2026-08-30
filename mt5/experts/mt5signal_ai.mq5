@@ -154,8 +154,10 @@ void OnTick()
     bool m15StochUp   = stoch15Main > stoch15Sig;
     bool m15StochDown = stoch15Main < stoch15Sig;
 
-    bool m5Buy  = (price > ma20) && sarJustFlippedBullish && m15StochUp;
-    bool m5Sell = (price < ma20) && sarJustFlippedBearish && m15StochDown;
+    //bool m5Buy  = (price > ma20) && sarJustFlippedBullish && m15StochUp;
+    //bool m5Sell = (price < ma20) && sarJustFlippedBearish && m15StochDown;
+    bool m5Buy  = (price > ma20) && sarJustFlippedBullish;
+    bool m5Sell = (price < ma20) && sarJustFlippedBearish;
 
     // BUGFIX #2: only clear lastSignalType once we've moved to a new candle.
     // Previously this reset on every tick where m5Buy/m5Sell happened to be
